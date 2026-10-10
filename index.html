@@ -166,6 +166,14 @@ h1 span{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-b
 
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:7px 14px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
 .toast.show{opacity:1}
+.safe{display:flex;gap:6px;margin:4px 0 2px}
+.bk{flex:1;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px;font-size:13px;font-weight:700;color:var(--mute)}
+.safe-msg{background:var(--card);border:2px solid var(--red);border-radius:10px;padding:8px;margin-top:6px;font-size:13px}
+.safe-msg p{margin-bottom:6px}
+.safe-msg .row{display:flex;gap:6px}
+.safe-msg button{flex:1;border-radius:8px;padding:7px;font-weight:700;font-size:13px}
+.safe-msg .yes{background:var(--red);color:#fff}
+.safe-msg .no{background:var(--bg);color:var(--mute)}
 </style>
 </head>
 <body>
@@ -222,6 +230,14 @@ h1 span{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-b
     <div class="fld"><input class="n" id="getNote" placeholder="Note (optional)"><button class="mic" data-for="getNote" aria-label="speak">🎤</button></div>
   </div>
 </section>
+
+<!-- Backup / Restore -->
+<div class="safe">
+  <button class="bk" id="backupBtn">💾 Backup</button>
+  <button class="bk" id="restoreBtn">♻️ Restore</button>
+  <input type="file" id="restoreFile" hidden>
+</div>
+<div class="safe-msg" id="restoreMsg" hidden></div>
 
 <!-- Copy-to-day sheet -->
 <div class="veil" id="veil">
@@ -529,6 +545,53 @@ $("sheetDays").addEventListener("click",e=>{
 });
 $("sheetCancel").addEventListener("click",closeSheet);
 $("veil").addEventListener("click",e=>{if(e.target.id==="veil")closeSheet();});
+
+/* ---------- Backup / Restore ---------- */
+$("backupBtn").addEventListener("click",()=>{
+  const out={app:"myweek",version:1,saved:new Date().toISOString(),dates:data.dates,focus:data.focus,get:data.get};
+  const blob=new Blob([JSON.stringify(out,null,1)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`myweek-backup-${ymd(new Date())}.json`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  toast("Backup saved to your Downloads");
+});
+$("restoreBtn").addEventListener("click",()=>{$("restoreFile").value="";$("restoreFile").click();});
+let pendingRestore=null;
+$("restoreFile").addEventListener("change",()=>{
+  const f=$("restoreFile").files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    let b=null;
+    try{b=JSON.parse(rd.result);}catch(e){}
+    if(!b||b.app!=="myweek"||typeof b.dates!=="object"||!Array.isArray(b.focus)||!Array.isArray(b.get)){
+      toast("That file isn't a My Week backup. Pick a file named myweek-backup-….json");return;
+    }
+    pendingRestore=b;
+    const when=b.saved?new Date(b.saved).toLocaleString(undefined,{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}):"an earlier date";
+    const m=$("restoreMsg");
+    m.innerHTML=`<p>Replace everything in the app with the backup from <b>${esc(when)}</b>? Anything added since then will be lost.</p>
+      <div class="row"><button class="yes" id="restoreYes">Replace with backup</button><button class="no" id="restoreNo">Cancel</button></div>`;
+    m.hidden=false;m.scrollIntoView({behavior:"smooth",block:"center"});
+    $("restoreYes").onclick=()=>{
+      const r=pendingRestore;pendingRestore=null;m.hidden=true;
+      const clean=list=>(Array.isArray(list)?list:[]).filter(x=>x&&typeof x.t==="string").map(x=>({t:x.t,n:typeof x.n==="string"?x.n:""}));
+      const dates={};
+      Object.keys(r.dates).forEach(k=>{
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(k))return;
+        const todo=(Array.isArray(r.dates[k].todo)?r.dates[k].todo:[]).filter(x=>x&&typeof x.t==="string")
+          .map(x=>({t:x.t,n:typeof x.n==="string"?x.n:"",p:[0,1,2].includes(x.p)?x.p:1}));
+        if(todo.length)dates[k]={todo,get:[]};
+      });
+      data.dates=dates;data.focus=clean(r.focus);data.get=clean(r.get);
+      editingFocus=-1;save();render();toast("Your list was restored from the backup");
+    };
+    $("restoreNo").onclick=()=>{pendingRestore=null;m.hidden=true;};
+  };
+  rd.onerror=()=>toast("Couldn't read that file. Try picking it again.");
+  rd.readAsText(f);
+});
 
 /* ---------- Calendar ---------- */
 let calMonth=new Date(today.getFullYear(),today.getMonth(),1);
